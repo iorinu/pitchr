@@ -1,0 +1,28 @@
+/* ローカルフォント。Tauri の CSP/オフラインで詰まらないように Google Fonts は使わない。 */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Variable.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Oswald";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/fonts/Oswald-Variable.woff2") format("woff2-variations");
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: #0c0d10;
+  color: #e8e8ea;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
