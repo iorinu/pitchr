@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type ReactNode,
   type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   Upload, Play, Pause, ZoomIn, ZoomOut, Wand2, Trash2,
@@ -424,6 +425,18 @@ export default function PitchAnalyzer() {
     else setMarkers((m) => [...m, t].sort((a, b) => a - b)); // ダブルクリック=追加
   };
 
+  // ホイールで波形スクロール（拡大時用）。
+  // 横ホイール（トラックパッド二本指水平）と Shift+縦ホイールを波形のスクロールに割り当てる。
+  // 画面下のスライダーは「再生プログレスバー」に役割を譲ったため、ここでスクロール手段を担保する。
+  const onWheel = (e: ReactWheelEvent<HTMLCanvasElement>) => {
+    const dx = e.shiftKey ? e.deltaY : e.deltaX;
+    if (dx === 0) return;
+    const delta = dx / pxPerSec;
+    setScroll((s) =>
+      Math.max(0, Math.min(Math.max(0, dur - viewW / pxPerSec), s + delta)),
+    );
+  };
+
   const togglePlay = () => {
     const el = mediaRef.current;
     if (!el) return;
@@ -454,7 +467,6 @@ export default function PitchAnalyzer() {
   const zoom = (f: number) =>
     setPxPerSec((p) => Math.max(20, Math.min(2000, p * f)));
   const pitch = computePitch(markers, regionStart, regionEnd);
-  const maxScroll = Math.max(0, dur - viewW / pxPerSec);
 
   return (
     <div style={S.root}>
@@ -522,6 +534,7 @@ export default function PitchAnalyzer() {
             onMouseUp={onMouseUp}
             onMouseLeave={onMouseUp}
             onDoubleClick={onDoubleClick}
+            onWheel={onWheel}
           />
           {!mediaUrl && (
             <div style={S.empty}>動画 or 音声ファイルを読み込んでください</div>
@@ -529,15 +542,16 @@ export default function PitchAnalyzer() {
         </div>
       </div>
 
-      {mediaUrl && maxScroll > 0 && (
+      {mediaUrl && dur > 0 && (
         <input
           type="range"
           min={0}
-          max={maxScroll}
+          max={dur}
           step={0.01}
-          value={Math.min(scroll, maxScroll)}
-          onChange={(e) => setScroll(parseFloat(e.target.value))}
+          value={Math.min(playhead, dur)}
+          onChange={(e) => seek(parseFloat(e.target.value))}
           style={S.scrollbar}
+          aria-label="再生位置"
         />
       )}
 
@@ -630,7 +644,7 @@ export default function PitchAnalyzer() {
         <span style={S.hint}>
           空きをクリック=シーク / ダブルクリック=接地マーカー追加 /
           マーカーをドラッグ=移動 / マーカーをダブルクリック=削除 ・
-          緑=開始 橙=終了の線もドラッグ可
+          緑=開始 橙=終了の線もドラッグ可 ・ 波形は横ホイール/Shift+ホイールでスクロール
         </span>
         <span style={S.status}>{status}</span>
       </div>
