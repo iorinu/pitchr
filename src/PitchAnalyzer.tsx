@@ -135,6 +135,7 @@ export default function PitchAnalyzer() {
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [sensitivity, setSensitivity] = useState(0.5);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [status, setStatus] = useState("");
   const [fileName, setFileName] = useState("");
   const [viewW, setViewW] = useState(900);
@@ -346,6 +347,12 @@ export default function PitchAnalyzer() {
   useEffect(() => {
     draw();
   }, [draw]);
+
+  // 再生速度（playbackRate）を <video>/<audio> 要素に反映。
+  // 要素が isVideo/mediaUrl の変化で作り直されるので、それらにも依存させる。
+  useEffect(() => {
+    if (mediaRef.current) mediaRef.current.playbackRate = playbackRate;
+  }, [playbackRate, mediaUrl, isVideo]);
   useEffect(() => {
     const upd = () => {
       if (wrapRef.current) setViewW(wrapRef.current.clientWidth);
@@ -572,6 +579,26 @@ export default function PitchAnalyzer() {
           <ZoomOut size={16} />
           縮小
         </button>
+        <div style={S.divider} />
+        {[0.25, 0.5, 0.75, 1].map((r) => {
+          const active = playbackRate === r;
+          return (
+            <button
+              key={r}
+              style={{
+                ...S.iconBtn,
+                ...(active
+                  ? { borderColor: "#5ad1ff", color: "#5ad1ff" }
+                  : {}),
+              }}
+              onClick={() => setPlaybackRate(r)}
+              disabled={!mediaUrl}
+              aria-pressed={active}
+            >
+              {r}x
+            </button>
+          );
+        })}
         <div style={S.divider} />
         <button
           style={{ ...S.iconBtn, borderColor: "#3ddc84", color: "#3ddc84" }}
