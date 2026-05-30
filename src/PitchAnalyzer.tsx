@@ -43,6 +43,7 @@ function detectOnsets(
   const nFrames = Math.floor((region.length - frameSize) / hop);
   if (nFrames <= 0) return [];
 
+  // 短時間 RMS の正方向差分（エンベロープ フラックス）を計算
   const flux = new Float32Array(nFrames);
   let prevRms = 0;
   for (let i = 0; i < nFrames; i++) {
@@ -58,6 +59,7 @@ function detectOnsets(
     prevRms = rms;
   }
 
+  // 動画ごとに音量レベルが違うので、平均+k*標準偏差で相対閾値
   const mean = flux.reduce((x, y) => x + y, 0) / nFrames;
   const variance =
     flux.reduce((x, y) => x + (y - mean) * (y - mean), 0) / nFrames;
