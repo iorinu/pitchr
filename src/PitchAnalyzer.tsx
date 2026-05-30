@@ -92,6 +92,33 @@ type PitchResult = {
   instant: number[];
 };
 
+// 1歩ごとの時間情報。接地マーカーから累積時間と直前との差分を計算する。
+// 累積の基準は区間開始(regionStart)。区間が未設定なら最初の接地を 0 とする。
+type StepRow = {
+  idx: number;
+  t: number;     // 動画上の絶対時刻 (秒)
+  cum: number;   // 区間開始からの累積時間 (秒)
+  gap: number | null; // 直前の接地からの Δt (秒)。最初の接地は null
+  ips: number | null; // 1/Δt = 歩/秒
+};
+function computeStepRows(
+  markers: number[],
+  a: number | null,
+  b: number | null,
+): StepRow[] {
+  let ms = [...markers].sort((x, y) => x - y);
+  if (a != null && b != null) ms = ms.filter((m) => m >= a && m <= b);
+  if (ms.length === 0) return [];
+  const base = a ?? ms[0];
+  return ms.map((t, i) => ({
+    idx: i + 1,
+    t,
+    cum: t - base,
+    gap: i > 0 ? t - ms[i - 1] : null,
+    ips: i > 0 && t - ms[i - 1] > 0 ? 1 / (t - ms[i - 1]) : null,
+  }));
+}
+
 // ピッチ = 歩/秒。区間 [a,b] が指定されていれば範囲内マーカーのみ。
 function computePitch(
   markers: number[],
@@ -474,6 +501,7 @@ export default function PitchAnalyzer() {
   const zoom = (f: number) =>
     setPxPerSec((p) => Math.max(20, Math.min(2000, p * f)));
   const pitch = computePitch(markers, regionStart, regionEnd);
+  const stepRows = computeStepRows(markers, regionStart, regionEnd);
 
   return (
     <div style={S.root}>
@@ -667,6 +695,16 @@ export default function PitchAnalyzer() {
         </div>
       )}
 
+      {stepRows.length > 0 && (
+        <div style={S.chartWrap}>
+          <div style={S.chartTitle}>
+            接地ごとのタイム(
+            {regionStart != null ? "区間開始" : "1歩目"}からの累積 / 直前との差分)
+          </div>
+          <StepsTable rows={stepRows} />
+        </div>
+      )}
+
       <div style={S.footer}>
         <span style={S.hint}>
           空きをクリック=シーク / ダブルクリック=接地マーカー追加 /
@@ -676,6 +714,37 @@ export default function PitchAnalyzer() {
         <span style={S.status}>{status}</span>
       </div>
       {fileName && <div style={S.fname}>file: {fileName}</div>}
+    </div>
+  );
+}
+
+function StepsTable({ rows }: { rows: StepRow[] }) {
+  return (
+    <div style={S.tableScroll}>
+      <table style={S.table}>
+        <thead>
+          <tr>
+            <th style={{ ...S.th, textAlign: "left" }}>#</th>
+            <th style={S.th}>時刻 (s)</th>
+            <th style={S.th}>累積 (s)</th>
+            <th style={S.th}>Δt (s)</th>
+            <th style={S.th}>歩/秒</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.idx}>
+              <td style={{ ...S.td, textAlign: "left", color: "#7e818c" }}>
+                {r.idx}
+              </td>
+              <td style={S.td}>{r.t.toFixed(3)}</td>
+              <td style={S.td}>{r.cum.toFixed(3)}</td>
+              <td style={S.td}>{r.gap != null ? r.gap.toFixed(3) : "—"}</td>
+              <td style={S.td}>{r.ips != null ? r.ips.toFixed(2) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -771,6 +840,10 @@ const S: Record<string, CSSProperties> = {
   slider: { width: 110, accentColor: "#5ad1ff" },
   chartWrap: { marginTop: 16, background: "#131419", border: "1px solid #20222a", borderRadius: 10, padding: "10px 14px" },
   chartTitle: { fontSize: 11, color: "#7e818c", letterSpacing: 1, marginBottom: 4 },
+  tableScroll: { maxHeight: 260, overflowY: "auto", marginTop: 4 },
+  table: { width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 12 },
+  th: { textAlign: "right", padding: "4px 8px", color: "#7e818c", fontWeight: 500, fontSize: 11, letterSpacing: 0.5, borderBottom: "1px solid #20222a", position: "sticky", top: 0, background: "#131419" },
+  td: { textAlign: "right", padding: "3px 8px", color: "#e8e8ea", borderBottom: "1px solid #1a1c22", fontVariantNumeric: "tabular-nums" },
   footer: { marginTop: 16, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" },
   hint: { fontSize: 11, color: "#5a5d67", maxWidth: "62%" },
   status: { fontSize: 11, color: "#5ad1ff", textAlign: "right" },
