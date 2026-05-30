@@ -907,8 +907,9 @@ export default function PitchAnalyzer() {
           <div style={S.chartTitle}>
             接地ごとのタイム(
             {regionStart != null ? "区間開始" : "1歩目"}からの累積 / 直前との差分)
+            ・ 行クリックでそのマーカーへジャンプ
           </div>
-          <StepsTable rows={stepRows} />
+          <StepsTable rows={stepRows} onJump={seek} playhead={playhead} />
         </div>
       )}
 
@@ -926,7 +927,15 @@ export default function PitchAnalyzer() {
   );
 }
 
-function StepsTable({ rows }: { rows: StepRow[] }) {
+function StepsTable({
+  rows,
+  onJump,
+  playhead,
+}: {
+  rows: StepRow[];
+  onJump: (t: number) => void;
+  playhead: number;
+}) {
   return (
     <div style={S.tableScroll}>
       <table style={S.table}>
@@ -940,17 +949,27 @@ function StepsTable({ rows }: { rows: StepRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.idx}>
-              <td style={{ ...S.td, textAlign: "left", color: "#7e818c" }}>
-                {r.idx}
-              </td>
-              <td style={S.td}>{r.t.toFixed(3)}</td>
-              <td style={S.td}>{r.cum.toFixed(3)}</td>
-              <td style={S.td}>{r.gap != null ? r.gap.toFixed(3) : "—"}</td>
-              <td style={S.td}>{r.ips != null ? r.ips.toFixed(2) : "—"}</td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            // 再生ヘッドが ±100ms 以内ならその行を「現在行」として強調。
+            // 100ms はマーカー削除と同じ tolerance。接地間隔の半分より小さければ
+            // 一意に決まる。
+            const isCurrent = Math.abs(r.t - playhead) < 0.1;
+            return (
+              <tr
+                key={r.idx}
+                className={`stepRow${isCurrent ? " current" : ""}`}
+                onClick={() => onJump(r.t)}
+              >
+                <td style={{ ...S.td, textAlign: "left", color: "#7e818c" }}>
+                  {r.idx}
+                </td>
+                <td style={S.td}>{r.t.toFixed(3)}</td>
+                <td style={S.td}>{r.cum.toFixed(3)}</td>
+                <td style={S.td}>{r.gap != null ? r.gap.toFixed(3) : "—"}</td>
+                <td style={S.td}>{r.ips != null ? r.ips.toFixed(2) : "—"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

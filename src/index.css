@@ -26,3 +26,15 @@ html, body, #root {
 * {
   box-sizing: border-box;
 }
+
+/* 接地タイム表の行: ホバーでハイライト、再生位置に対応する行は青系で強調 */
+.stepRow {
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+.stepRow:hover {
+  background: #1a1c22;
+}
+.stepRow.current {
+  background: rgba(90, 209, 255, 0.12);
+}
