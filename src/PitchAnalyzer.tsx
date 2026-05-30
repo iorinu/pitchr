@@ -11,7 +11,7 @@ import {
 import {
   Upload, Play, Pause, ZoomIn, ZoomOut, Wand2, Trash2,
   Footprints, Activity, Gauge, Crosshair, FlagTriangleRight,
-  FlagTriangleLeft, RotateCcw,
+  FlagTriangleLeft, RotateCcw, MapPin, StepBack, StepForward,
 } from "lucide-react";
 import { pickMediaFile } from "./lib/openMediaFile";
 import { extractWaveform, type Waveform } from "./lib/extractWaveform";
@@ -163,6 +163,7 @@ export default function PitchAnalyzer() {
   const [playhead, setPlayhead] = useState(0);
   const [sensitivity, setSensitivity] = useState(0.5);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [videoFps, setVideoFps] = useState(60);
   const [status, setStatus] = useState("");
   const [fileName, setFileName] = useState("");
   const [viewW, setViewW] = useState(900);
@@ -369,6 +370,29 @@ export default function PitchAnalyzer() {
       g.lineTo(px, H);
       g.stroke();
     }
+
+    // ドラッグ中ツールチップ: 操作中の要素の時刻を波形上に数値表示。
+    // dragRef は ref で再レンダーをトリガーしないが、ドラッグ中は onMouseMove で
+    // markers/region state が変わって draw が呼び直されるので、自動で更新される。
+    const drag = dragRef.current;
+    let dragT: number | null = null;
+    if (drag?.type === "marker") {
+      dragT = markers[drag.idx] ?? null;
+    } else if (drag?.type === "region") {
+      dragT = drag.edge === "start" ? regionStart : regionEnd;
+    }
+    if (dragT != null) {
+      const dx = (dragT - scroll) * pxPerSec;
+      const label = dragT.toFixed(3) + "s";
+      g.font = "11px ui-monospace, monospace";
+      const tw = g.measureText(label).width;
+      const lx = Math.max(4, Math.min(W - tw - 12, dx + 8));
+      const ly = 36;
+      g.fillStyle = "rgba(20, 22, 28, 0.92)";
+      g.fillRect(lx - 4, ly - 12, tw + 8, 18);
+      g.fillStyle = "#fff";
+      g.fillText(label, lx, ly);
+    }
   }, [waveform, markers, pxPerSec, scroll, playhead, viewW, regionStart, regionEnd]);
 
   useEffect(() => {
@@ -380,6 +404,35 @@ export default function PitchAnalyzer() {
   useEffect(() => {
     if (mediaRef.current) mediaRef.current.playbackRate = playbackRate;
   }, [playbackRate, mediaUrl, isVideo]);
+
+  // キーボードショートカット:
+  //   Space  = 再生/停止
+  //   M      = 現在位置にマーカー（Shift+M でスナップ無効）
+  //   ← / →  = コマ送り (1/fps 秒)
+  // input/range/textarea にフォーカスがある時は無効化（感度スライダー操作を邪魔しないため）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        addMarkerAtPlayhead(e.shiftKey);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        stepFrame(e.shiftKey ? -5 : -1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        stepFrame(e.shiftKey ? 5 : 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // 依存に並べているのは、各ハンドラが最新の state クロージャを掴むため。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, playhead, mediaUrl, dur, viewW, pxPerSec, scroll, regionStart, videoFps, waveform]);
   useEffect(() => {
     const upd = () => {
       if (wrapRef.current) setViewW(wrapRef.current.clientWidth);
@@ -453,10 +506,80 @@ export default function PitchAnalyzer() {
     dragRef.current = null;
   };
   const onDoubleClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
-    const t = xToTime(e.clientX);
-    const idx = nearestMarker(t);
-    if (idx >= 0) setMarkers((m) => m.filter((_, i) => i !== idx));
-    else setMarkers((m) => [...m, t].sort((a, b) => a - b)); // ダブルクリック=追加
+    const t0 = xToTime(e.clientX);
+    const idx = nearestMarker(t0);
+    if (idx >= 0) {
+      setMarkers((m) => m.filter((_, i) => i !== idx));
+      return;
+    }
+    // 追加: 既定はスナップなし（生のクリック位置）。Shift 押下時のみ波形ピークに吸着。
+    const t = e.shiftKey ? snapToOnset(t0) : t0;
+    setMarkers((m) => [...m, t].sort((a, b) => a - b));
+  };
+
+  // 1フレーム単位のコマ送り。短距離の接地は数フレームで状態が変わるので
+  // 通常再生で止めるのは無理。一度 pause してから currentTime を ±1/fps 動かす。
+  // 注: video.currentTime は実際の動画フレームに丸められるが、視覚的には
+  //     ほぼ「次のフレーム」に進む。ffmpeg/ffprobe 経由で正確な fps を取れば
+  //     更に厳密にできるが、今は input で fps を指定する方針。
+  const stepFrame = (delta: number) => {
+    const el = mediaRef.current;
+    if (!el || !mediaUrl) return;
+    el.pause();
+    setPlaying(false);
+    const fps = videoFps > 0 ? videoFps : 60;
+    const newT = Math.max(0, Math.min(dur || el.currentTime, el.currentTime + delta / fps));
+    el.currentTime = newT;
+    setPlayhead(newT);
+  };
+
+  // 指定時刻の近傍にある波形の急な立ち上がり（接地音らしいフラックスのピーク）に
+  // スナップする。detectOnsets と同じ式（RMS の正方向差分）の局所最大を探す。
+  // halfWindowSec は探索半径（デフォルト 50ms）。接地音は1フレーム以内に立ち
+  // 上がるので、目視で「だいたい合ってる」位置からピン留めできる程度の幅を取る。
+  const snapToOnset = (t: number, halfWindowSec = 0.05): number => {
+    if (!waveform) return t;
+    const { mono, sampleRate } = waveform;
+    const frameSize = 1024;
+    const hop = 256;
+    const center = Math.floor(t * sampleRate);
+    const winSamples = Math.floor(halfWindowSec * sampleRate);
+    const s0 = Math.max(0, center - winSamples);
+    const s1 = Math.min(mono.length - frameSize, center + winSamples);
+    if (s1 <= s0) return t;
+    let prevRms = 0;
+    let bestPos = -1;
+    let bestFlux = -Infinity;
+    for (let pos = s0; pos < s1; pos += hop) {
+      let sum = 0;
+      for (let j = 0; j < frameSize; j++) {
+        const s = mono[pos + j];
+        sum += s * s;
+      }
+      const rms = Math.sqrt(sum / frameSize);
+      const d = rms - prevRms;
+      const flux = d > 0 ? d : 0;
+      if (flux > bestFlux) {
+        bestFlux = flux;
+        bestPos = pos;
+      }
+      prevRms = rms;
+    }
+    if (bestPos < 0) return t;
+    return (bestPos + frameSize / 2) / sampleRate;
+  };
+
+  // 現在の再生ヘッド位置に接地マーカーを追加。
+  // 既定は **スナップなし**（再生位置をそのまま採用）。これはスロー再生 + コマ送りで
+  // 正確に合わせた位置を勝手に動かされたくないため。Shift 押下時のみ波形ピークに吸着する。
+  // 既存マーカーと 1ms 以内に重なる場合は無視（誤連打ガード）。
+  const addMarkerAtPlayhead = (snap = false) => {
+    if (!mediaUrl) return;
+    const t = snap ? snapToOnset(playhead) : playhead;
+    setMarkers((m) => {
+      if (m.some((mm) => Math.abs(mm - t) < 0.001)) return m;
+      return [...m, t].sort((a, b) => a - b);
+    });
   };
 
   // ホイールで波形スクロール（拡大時用）。
@@ -560,6 +683,12 @@ export default function PitchAnalyzer() {
           />
         )}
 
+        <div style={S.timeBar}>
+          <span style={S.timeNow}>{playhead.toFixed(3)}</span>
+          <span style={S.timeSep}>/</span>
+          <span style={S.timeTotal}>{dur > 0 ? dur.toFixed(2) : "—"}s</span>
+        </div>
+
         <div ref={wrapRef} style={S.waveWrap}>
           <canvas
             ref={canvasRef}
@@ -595,6 +724,39 @@ export default function PitchAnalyzer() {
           {playing ? <Pause size={16} /> : <Play size={16} />}
           {playing ? "停止" : "再生"}
         </button>
+        <button
+          style={S.iconBtn}
+          onClick={() => stepFrame(-1)}
+          disabled={!mediaUrl}
+          title="1フレーム戻す (←) / Shift+← で5フレーム"
+        >
+          <StepBack size={16} />
+          −1f
+        </button>
+        <button
+          style={S.iconBtn}
+          onClick={() => stepFrame(1)}
+          disabled={!mediaUrl}
+          title="1フレーム進める (→) / Shift+→ で5フレーム"
+        >
+          <StepForward size={16} />
+          +1f
+        </button>
+        <div style={S.sliderGroup}>
+          <span style={S.sliderLabel}>fps</span>
+          <input
+            type="number"
+            min={1}
+            max={240}
+            step={1}
+            value={videoFps}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (Number.isFinite(v) && v > 0) setVideoFps(v);
+            }}
+            style={S.fpsInput}
+          />
+        </div>
         <button style={S.iconBtn} onClick={() => zoom(1.5)} disabled={!mediaUrl}>
           <ZoomIn size={16} />
           拡大
@@ -608,7 +770,7 @@ export default function PitchAnalyzer() {
           縮小
         </button>
         <div style={S.divider} />
-        {[0.25, 0.5, 0.75, 1].map((r) => {
+        {[0.1, 0.25, 0.5, 0.75, 1].map((r) => {
           const active = playbackRate === r;
           return (
             <button
@@ -660,6 +822,15 @@ export default function PitchAnalyzer() {
       <div style={S.controls}>
         <button
           style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
+          onClick={(e) => addMarkerAtPlayhead(e.shiftKey)}
+          disabled={!mediaUrl}
+          title="現在の再生位置にマーカーを追加 (M) / Shift+クリックで波形ピークにスナップ"
+        >
+          <MapPin size={16} />
+          現在位置に追加
+        </button>
+        <button
+          style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
           onClick={autoDetect}
           disabled={!waveform}
         >
@@ -709,7 +880,8 @@ export default function PitchAnalyzer() {
         <span style={S.hint}>
           空きをクリック=シーク / ダブルクリック=接地マーカー追加 /
           マーカーをドラッグ=移動 / マーカーをダブルクリック=削除 ・
-          緑=開始 橙=終了の線もドラッグ可 ・ 波形は横ホイール/Shift+ホイールでスクロール
+          緑=開始 橙=終了の線もドラッグ可 ・ 波形は横ホイール/Shift+ホイールでスクロール ・
+          Space=再生/停止 / ←→=コマ送り(Shiftで5f) / M=現在位置にマーカー(Shiftで波形ピークに吸着)
         </span>
         <span style={S.status}>{status}</span>
       </div>
@@ -838,6 +1010,11 @@ const S: Record<string, CSSProperties> = {
   sliderGroup: { display: "flex", alignItems: "center", gap: 8 },
   sliderLabel: { fontSize: 11, color: "#7e818c" },
   slider: { width: 110, accentColor: "#5ad1ff" },
+  fpsInput: { width: 56, background: "#16181e", color: "#d5d7dd", border: "1px solid #262932", borderRadius: 6, padding: "4px 6px", fontFamily: mono, fontSize: 12, fontVariantNumeric: "tabular-nums" },
+  timeBar: { display: "flex", justifyContent: "center", alignItems: "baseline", gap: 8, padding: "4px 0 6px", fontVariantNumeric: "tabular-nums" },
+  timeNow: { fontFamily: mono, fontSize: 24, color: "#fff", fontWeight: 700, letterSpacing: 1 },
+  timeSep: { color: "#3f424b", fontSize: 16 },
+  timeTotal: { fontFamily: mono, fontSize: 12, color: "#7e818c" },
   chartWrap: { marginTop: 16, background: "#131419", border: "1px solid #20222a", borderRadius: 10, padding: "10px 14px" },
   chartTitle: { fontSize: 11, color: "#7e818c", letterSpacing: 1, marginBottom: 4 },
   tableScroll: { maxHeight: 260, overflowY: "auto", marginTop: 4 },
