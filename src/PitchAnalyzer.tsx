@@ -11,7 +11,7 @@ import {
 import {
   Upload, Play, Pause, ZoomIn, ZoomOut, Wand2, Trash2,
   Footprints, Activity, Gauge, Crosshair, FlagTriangleRight,
-  FlagTriangleLeft, RotateCcw, MapPin, StepBack, StepForward,
+  FlagTriangleLeft, RotateCcw, MapPin, MapPinOff, StepBack, StepForward,
 } from "lucide-react";
 import { pickMediaFile } from "./lib/openMediaFile";
 import { extractWaveform, type Waveform } from "./lib/extractWaveform";
@@ -422,6 +422,9 @@ export default function PitchAnalyzer() {
       } else if (e.key === "m" || e.key === "M") {
         e.preventDefault();
         addMarkerAtPlayhead(e.shiftKey);
+      } else if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        removeMarkerAtPlayhead();
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         stepFrame(e.shiftKey ? -5 : -1);
@@ -434,7 +437,7 @@ export default function PitchAnalyzer() {
     return () => window.removeEventListener("keydown", onKey);
     // 依存に並べているのは、各ハンドラが最新の state クロージャを掴むため。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, playhead, mediaUrl, dur, viewW, pxPerSec, scroll, regionStart, videoFps, waveform]);
+  }, [playing, playhead, mediaUrl, dur, viewW, pxPerSec, scroll, regionStart, videoFps, waveform, markers]);
   useEffect(() => {
     const upd = () => {
       if (wrapRef.current) setViewW(wrapRef.current.clientWidth);
@@ -582,6 +585,28 @@ export default function PitchAnalyzer() {
       if (m.some((mm) => Math.abs(mm - t) < 0.001)) return m;
       return [...m, t].sort((a, b) => a - b);
     });
+  };
+
+  // 現在の再生ヘッドに最も近いマーカーを削除（±100ms 以内のみ）。
+  // 100ms は短距離の接地間隔(~200ms)の半分。これより遠いなら別の歩のマーカー
+  // を指していて誤削除になるので何もしない。
+  const removeMarkerAtPlayhead = () => {
+    if (!mediaUrl || markers.length === 0) return;
+    const tol = 0.1;
+    let bestIdx = -1;
+    let bestD = Infinity;
+    markers.forEach((m, i) => {
+      const d = Math.abs(m - playhead);
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
+    });
+    if (bestIdx < 0 || bestD > tol) {
+      setStatus("再生位置の近く (±100ms) にマーカーがありません");
+      return;
+    }
+    setMarkers((m) => m.filter((_, i) => i !== bestIdx));
   };
 
   // ホイールで波形スクロール（拡大時用）。
@@ -833,6 +858,15 @@ export default function PitchAnalyzer() {
         </button>
         <button
           style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
+          onClick={removeMarkerAtPlayhead}
+          disabled={!mediaUrl || markers.length === 0}
+          title="現在の再生位置の近く (±100ms) のマーカーを削除 (D)"
+        >
+          <MapPinOff size={16} />
+          現在位置を削除
+        </button>
+        <button
+          style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
           onClick={autoDetect}
           disabled={!waveform}
         >
@@ -883,7 +917,7 @@ export default function PitchAnalyzer() {
           空きをクリック=シーク / ダブルクリック=接地マーカー追加 /
           マーカーをドラッグ=移動 / マーカーをダブルクリック=削除 ・
           緑=開始 橙=終了の線もドラッグ可 ・ 波形は横ホイール/Shift+ホイールでスクロール ・
-          Space=再生/停止 / ←→=コマ送り(Shiftで5f) / M=現在位置にマーカー(Shiftで波形ピークに吸着)
+          Space=再生/停止 / ←→=コマ送り(Shiftで5f) / M=現在位置にマーカー(Shiftで波形ピークに吸着) / D=現在位置近くのマーカー削除
         </span>
         <span style={S.status}>{status}</span>
       </div>
