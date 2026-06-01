@@ -30,19 +30,9 @@ export async function extractWaveform(picked: PickedMedia): Promise<Waveform> {
   if (!picked.blob) {
     throw new Error("Web 環境では File 経由でしか波形を読めません");
   }
-  const arr = await picked.blob.arrayBuffer();
-  const Ctor =
-    (window as unknown as { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext ?? window.AudioContext;
-  const ctx = new Ctor();
-  const buf = await ctx.decodeAudioData(arr);
-  const ch = buf.numberOfChannels;
-  const len = buf.length;
-  const m = new Float32Array(len);
-  // チャンネル平均でモノラル化（プロトと同じ挙動）。
-  for (let c = 0; c < ch; c++) {
-    const d = buf.getChannelData(c);
-    for (let i = 0; i < len; i++) m[i] += d[i] / ch;
-  }
-  return { mono: m, sampleRate: buf.sampleRate, duration: buf.duration };
+
+  // Web 環境では WebCodecs ベースの実装を別ファイルに切り出している。
+  // 失敗時は ffmpeg.wasm にフォールバック（別タスクで実装）。
+  const { extractWaveformWeb } = await import("./extractWaveform.web");
+  return await extractWaveformWeb(picked.blob);
 }
