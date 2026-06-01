@@ -207,20 +207,39 @@ async function decodeMp4WithWebCodecs(file: File): Promise<Waveform> {
 
 // ---- エントリポイント -----------------------------------------------------
 
-export async function extractWaveformWeb(file: File): Promise<Waveform> {
+export type ExtractProgress = (stage: string) => void;
+
+export async function extractWaveformWeb(
+  file: File,
+  onProgress?: ExtractProgress,
+): Promise<Waveform> {
   // mp4 系は decodeAudioData では読めないことが多いので先に WebCodecs を試す。
   const name = file.name.toLowerCase();
-  const isMp4 = name.endsWith(".mp4") || name.endsWith(".m4a") || file.type.includes("mp4");
+  const isMp4 =
+    name.endsWith(".mp4") ||
+    name.endsWith(".m4a") ||
+    file.type.includes("mp4");
 
   if (isMp4) {
     try {
+      onProgress?.("WebCodecs で mp4 をデコード中");
       return await decodeMp4WithWebCodecs(file);
     } catch (e) {
-      // ここで失敗したら呼び出し側で ffmpeg.wasm に回す
-      throw e;
+      console.warn("WebCodecs 経路が失敗、ffmpeg.wasm にフォールバック:", e);
+      onProgress?.("ffmpeg.wasm をロード中（初回は時間がかかります）");
+      const { extractWaveformFFmpeg } = await import("./extractWaveform.ffmpeg");
+      return await extractWaveformFFmpeg(file, (m) => onProgress?.(`ffmpeg: ${m}`));
     }
   }
 
-  // wav/mp3 などはまず decodeAudioData。
-  return await decodeWithAudioContext(file);
+  // wav/mp3 などはまず decodeAudioData、失敗したら ffmpeg.wasm。
+  try {
+    onProgress?.("AudioContext でデコード中");
+    return await decodeWithAudioContext(file);
+  } catch (e) {
+    console.warn("decodeAudioData が失敗、ffmpeg.wasm にフォールバック:", e);
+    onProgress?.("ffmpeg.wasm をロード中（初回は時間がかかります）");
+    const { extractWaveformFFmpeg } = await import("./extractWaveform.ffmpeg");
+    return await extractWaveformFFmpeg(file, (m) => onProgress?.(`ffmpeg: ${m}`));
+  }
 }
