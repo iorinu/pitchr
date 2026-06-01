@@ -12,7 +12,12 @@ export type Waveform = {
 // - Tauri: Rust 側 `extract_waveform` コマンド（ffmpeg sidecar 経由）を呼ぶ。
 //          ブラウザの decodeAudioData は mp4 動画の音声を読めないことが多いため。
 // - Web:   AudioContext.decodeAudioData にそのまま流す（wav/mp3 のみ実用）。
-export async function extractWaveform(picked: PickedMedia): Promise<Waveform> {
+export type ExtractProgress = (stage: string) => void;
+
+export async function extractWaveform(
+  picked: PickedMedia,
+  onProgress?: ExtractProgress,
+): Promise<Waveform> {
   if (isTauri && picked.path) {
     const { invoke } = await import("@tauri-apps/api/core");
     const res = await invoke<{
@@ -34,5 +39,5 @@ export async function extractWaveform(picked: PickedMedia): Promise<Waveform> {
   // Web 環境では WebCodecs ベースの実装を別ファイルに切り出している。
   // 失敗時は ffmpeg.wasm にフォールバック（別タスクで実装）。
   const { extractWaveformWeb } = await import("./extractWaveform.web");
-  return await extractWaveformWeb(picked.blob);
+  return await extractWaveformWeb(picked.blob, onProgress);
 }

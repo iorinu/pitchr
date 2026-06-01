@@ -207,7 +207,9 @@ export default function PitchAnalyzer() {
     setWaveform(null);
     setStatus("波形抽出中...");
     try {
-      const wf = await extractWaveform(picked);
+      const wf = await extractWaveform(picked, (stage) =>
+        setStatus(`波形抽出中: ${stage}`),
+      );
       setWaveform(wf);
       setStatus(
         `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
