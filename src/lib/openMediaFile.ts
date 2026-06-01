@@ -42,10 +42,12 @@ export async function pickMediaFile(): Promise<PickedMedia | null> {
   }
 
   // ブラウザフォールバック（Tauri が無い環境）。
+  // Web 版で正式サポートするのは mp4/wav/mp3。
+  // mov/HEVC はブラウザ互換性が悪いため accept から除外（ユーザーが選んだ場合は抽出時にエラーになる）。
   return await new Promise<PickedMedia | null>((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "audio/*,video/*";
+    input.accept = "video/mp4,audio/wav,audio/mpeg,audio/mp3,.mp4,.wav,.mp3";
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) {
