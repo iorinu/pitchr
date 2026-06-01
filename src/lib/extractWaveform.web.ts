@@ -56,23 +56,27 @@ async function decodeWithAudioContext(file: File): Promise<Waveform> {
 //
 // mp4box は trak エントリに直接 mdia 等のオブジェクトをぶら下げているので、
 // それを辿って Box を直書きで Uint8Array に書き出す。
-function buildAudioDescription(
-  trak: any,
-  DataStream: any,
-): Uint8Array | undefined {
+// AudioDecoder.configure の description は box ヘッダ込みのバイナリではなく、
+// コーデック固有の「DecoderSpecificInfo」だけを要求する。
+// AAC の場合は esds 内の AudioSpecificConfig（普通 2〜5 バイト）が該当。
+function buildAudioDescription(trak: any): Uint8Array | undefined {
   const entries = trak?.mdia?.minf?.stbl?.stsd?.entries;
   if (!entries || entries.length === 0) return undefined;
   const entry = entries[0];
-  // AAC の場合 esds、Opus は dOps、FLAC は dfLa、ALAC は alac box が入っている。
-  const box = entry.esds ?? entry.dOps ?? entry.dfLa ?? entry.alac;
-  if (!box) return undefined;
 
-  // mp4box の Box.write でシリアライズ → 先頭 8 バイト (size + type) を捨てる。
-  // AudioDecoder.configure の description は box header を含めない生 payload を要求する。
-  const ds = new DataStream();
-  ds.endianness = DataStream.BIG_ENDIAN;
-  box.write(ds);
-  return new Uint8Array(ds.buffer, 8);
+  // AAC: esds → ES_Descriptor → DecoderConfigDescriptor → DecoderSpecificInfo.data
+  if (entry.esds?.esd?.descs?.[0]?.descs?.[0]?.data) {
+    return new Uint8Array(entry.esds.esd.descs[0].descs[0].data);
+  }
+  // Opus
+  if (entry.dOps?.data) {
+    return new Uint8Array(entry.dOps.data);
+  }
+  // FLAC
+  if (entry.dfLa?.data) {
+    return new Uint8Array(entry.dfLa.data);
+  }
+  return undefined;
 }
 
 async function decodeMp4WithWebCodecs(file: File): Promise<Waveform> {
@@ -83,7 +87,6 @@ async function decodeMp4WithWebCodecs(file: File): Promise<Waveform> {
   // 動的 import：mp4box は ESM だがサイズが大きいので必要な時だけロード。
   const MP4BoxMod: any = await import("mp4box");
   const MP4Box = MP4BoxMod.default ?? MP4BoxMod;
-  const DataStream = MP4BoxMod.DataStream ?? MP4BoxMod.default?.DataStream;
 
   const mp4 = MP4Box.createFile();
 
@@ -137,7 +140,29 @@ async function decodeMp4WithWebCodecs(file: File): Promise<Waveform> {
 
       // trak オブジェクトを mp4box から拾い、codec description を組み立てる
       const trak = mp4.getTrackById(at.id);
-      const description = buildAudioDescription(trak, DataStream);
+      const description = buildAudioDescription(trak);
+
+      const config: AudioDecoderConfig = {
+        codec: at.codec,
+        sampleRate,
+        numberOfChannels: at.audio?.channel_count ?? 2,
+        description,
+      };
+
+      // configure 前に対応チェック。原因切り分けがしやすい。
+      AudioDecoder.isConfigSupported(config)
+        .then((support) => {
+          if (!support.supported) {
+            reject(
+              new Error(
+                `AudioDecoder 未対応: codec=${at.codec} desc=${
+                  description ? description.length + "B" : "なし"
+                }`,
+              ),
+            );
+          }
+        })
+        .catch((e) => reject(e));
 
       decoder = new AudioDecoder({
         output: (frame: AudioData) => {
@@ -161,12 +186,7 @@ async function decodeMp4WithWebCodecs(file: File): Promise<Waveform> {
         error: (e) => reject(e),
       });
 
-      decoder.configure({
-        codec: at.codec,
-        sampleRate,
-        numberOfChannels: at.audio?.channel_count ?? 2,
-        description,
-      });
+      decoder.configure(config);
 
       mp4.setExtractionOptions(at.id, null, { nbSamples: 100 });
       mp4.start();

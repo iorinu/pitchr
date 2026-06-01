@@ -9,9 +9,10 @@
 import type { Waveform } from "./extractWaveform";
 
 // ffmpeg core (wasm + worker) は CDN から取得。
+// unpkg は CORS ヘッダを返さないケースがあるので jsDelivr を使う。
 // バージョンを固定して再現性を確保。
 const CORE_VERSION = "0.12.10";
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
+const CORE_BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 let ffmpegInstance: any | null = null;
 let loading: Promise<any> | null = null;
