@@ -177,6 +177,8 @@ export default function PitchAnalyzer() {
   const [viewW, setViewW] = useState(900);
   // D&D 中の視覚フィードバック用。Web 環境でのみ意味を持つ。
   const [isDragOver, setIsDragOver] = useState(false);
+  // ヘッダのタブ切替え（解析画面 / 使い方）。URL は変えず useState のみで管理。
+  const [tab, setTab] = useState<"analyze" | "help">("analyze");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -735,11 +737,34 @@ export default function PitchAnalyzer() {
           <span style={S.title}>PITCHR</span>
           <span style={S.sub}>接地音ピッチ解析</span>
         </div>
-        <button style={S.uploadBtn} onClick={openFile}>
-          <Upload size={15} />
-          <span>動画 / 音声を読込</span>
-        </button>
+        <div style={S.headerRight}>
+          <div style={S.tabs}>
+            <button
+              style={tab === "analyze" ? S.tabBtnActive : S.tabBtn}
+              onClick={() => setTab("analyze")}
+            >
+              解析
+            </button>
+            <button
+              style={tab === "help" ? S.tabBtnActive : S.tabBtn}
+              onClick={() => setTab("help")}
+            >
+              使い方
+            </button>
+          </div>
+          {tab === "analyze" && (
+            <button style={S.uploadBtn} onClick={openFile}>
+              <Upload size={15} />
+              <span>動画 / 音声を読込</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {tab === "help" && <HelpView />}
+      {tab === "analyze" && (
+        <>
+
 
       <div style={S.cards}>
         <Stat
@@ -997,6 +1022,61 @@ export default function PitchAnalyzer() {
         <span style={S.status}>{status}</span>
       </div>
       {fileName && <div style={S.fname}>file: {fileName}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---- 使い方ページ ----
+// 最低限の手順 + ショートカット表のみ。テキストベースで軽量に。
+function HelpView() {
+  return (
+    <div style={S.helpRoot}>
+      <h2 style={S.helpH}>使い方</h2>
+      <ol style={S.helpList}>
+        <li>
+          <b>動画 / 音声を読み込む</b>
+          <br />
+          右上の「動画 / 音声を読込」ボタン、またはウィンドウへの D&D で読み込む。
+          対応形式は mp4 / wav / mp3 / m4a。
+        </li>
+        <li>
+          <b>解析区間を決める</b>
+          <br />
+          再生位置を合わせて「開始を設定」「終了を設定」で区間の両端を決める。
+          区間外は計算と自動検出の対象外になる。緑/橙の縦線はドラッグで微調整可能。
+        </li>
+        <li>
+          <b>接地マーカーを置く</b>
+          <br />
+          自動: 「自動検出」ボタンで感度スライダーに応じて一括追加。<br />
+          手動: 波形をダブルクリックで追加、マーカーをドラッグで移動、
+          マーカーをダブルクリックで削除。
+        </li>
+        <li>
+          <b>ピッチを確認</b>
+          <br />
+          上部カードに区間内の平均・中央値・接地数・区間長が出る。
+          下の表で接地ごとの瞬間ピッチも確認できる。
+        </li>
+      </ol>
+
+      <h3 style={S.helpH3}>キーボード</h3>
+      <table style={S.helpTable}>
+        <tbody>
+          <tr><td style={S.helpKey}>Space</td><td>再生 / 停止</td></tr>
+          <tr><td style={S.helpKey}>← / →</td><td>1 フレーム戻る / 進む (Shift で 5f)</td></tr>
+          <tr><td style={S.helpKey}>M</td><td>現在位置にマーカー追加 (Shift で波形ピークに吸着)</td></tr>
+          <tr><td style={S.helpKey}>D</td><td>現在位置近くのマーカーを削除</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style={S.helpH3}>波形の操作</h3>
+      <ul style={S.helpList}>
+        <li>横ホイール / Shift + 縦ホイール: 波形を横スクロール</li>
+        <li>拡大 / 縮小ボタンで時間軸の拡大率を変更</li>
+      </ul>
     </div>
   );
 }
@@ -1124,6 +1204,16 @@ const S: Record<string, CSSProperties> = {
   title: { fontFamily: display, fontSize: 24, letterSpacing: 3, fontWeight: 700, color: "#fff" },
   sub: { fontSize: 11, color: "#6b6e78", letterSpacing: 1 },
   uploadBtn: { display: "flex", alignItems: "center", gap: 8, background: "#ff3b4e", color: "#fff", padding: "9px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", fontWeight: 600, border: "none", fontFamily: mono },
+  headerRight: { display: "flex", alignItems: "center", gap: 12 },
+  tabs: { display: "flex", background: "#16181e", border: "1px solid #262932", borderRadius: 8, padding: 3 },
+  tabBtn: { background: "transparent", color: "#8a8d97", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: mono, fontWeight: 600 },
+  tabBtnActive: { background: "#262932", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: mono, fontWeight: 600 },
+  helpRoot: { color: "#d5d7dd", fontSize: 13, lineHeight: 1.8, maxWidth: 760, margin: "20px auto", padding: "0 8px" },
+  helpH: { fontFamily: display, fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: 2, marginBottom: 16 },
+  helpH3: { fontFamily: display, fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: 1, marginTop: 24, marginBottom: 8 },
+  helpList: { paddingLeft: 20, display: "flex", flexDirection: "column", gap: 14 },
+  helpTable: { borderCollapse: "collapse", fontSize: 12 },
+  helpKey: { background: "#16181e", border: "1px solid #262932", borderRadius: 4, padding: "2px 8px", fontFamily: mono, color: "#5ad1ff", marginRight: 12, whiteSpace: "nowrap" },
   cards: { display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" },
   statCard: { flex: "1 1 130px", background: "#131419", border: "1px solid #20222a", borderRadius: 10, padding: "12px 14px" },
   statLabel: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#7e818c", letterSpacing: 1, marginBottom: 6 },
