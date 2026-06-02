@@ -13,8 +13,14 @@ import {
   Footprints, Activity, Gauge, Crosshair, FlagTriangleRight,
   FlagTriangleLeft, RotateCcw, MapPin, MapPinOff, StepBack, StepForward,
 } from "lucide-react";
-import { pickMediaFile } from "./lib/openMediaFile";
+import { pickMediaFile, type PickedMedia } from "./lib/openMediaFile";
 import { extractWaveform, type Waveform } from "./lib/extractWaveform";
+import { isTauri } from "./lib/platform";
+
+// Web 版で正式サポートする拡張子。
+// それ以外（mov, mkv, webm など）は WebCodecs/decodeAudioData では音声抽出が
+// 安定しないので、選んだ時点で明確に警告を出して諦めてもらう。
+const WEB_SUPPORTED = /\.(mp4|wav|mp3|m4a)$/i;
 
 // ============================================================
 // PITCHR — 接地音ベース ピッチ解析
@@ -180,6 +186,53 @@ export default function PitchAnalyzer() {
   const dur =
     waveform?.duration ?? (mediaDur && isFinite(mediaDur) ? mediaDur : 0);
 
+  // pickMediaFile（ボタン）と D&D の両方から呼ぶ共通ロード処理。
+  const loadPickedMedia = async (picked: PickedMedia) => {
+    // Web で対応外フォーマットは早めに警告。
+    // 動画再生はできることが多いので、波形だけ諦める形で続行する。
+    const isUnsupportedOnWeb =
+      !isTauri && !WEB_SUPPORTED.test(picked.fileName);
+
+    setFileName(picked.fileName);
+    setIsVideo(
+      /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(picked.fileName) ||
+        !!picked.blob?.type.startsWith("video"),
+    );
+    setMediaUrl(picked.srcUrl);
+    setMarkers([]);
+    setRegionStart(null);
+    setRegionEnd(null);
+    setScroll(0);
+    setPlayhead(0);
+    setWaveform(null);
+
+    if (isUnsupportedOnWeb) {
+      setStatus(
+        "このファイル形式は Web 版では波形抽出に対応していません(mp4/wav/mp3/m4a のみ)。動画再生は可能です。",
+      );
+      return;
+    }
+
+    setStatus("波形抽出中...");
+    try {
+      const wf = await extractWaveform(picked, (stage) =>
+        setStatus(`波形抽出中: ${stage}`),
+      );
+      setWaveform(wf);
+      setStatus(
+        `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
+      );
+    } catch (e) {
+      console.error(e);
+      setWaveform(null);
+      const detail = e instanceof Error ? e.message : String(e);
+      setStatus(
+        `波形抽出失敗(動画は再生可): ${detail}\n` +
+          "別の形式 (mp4/wav/mp3) を試してください。",
+      );
+    }
+  };
+
   const openFile = async () => {
     setStatus("ファイル選択中...");
     let picked;
@@ -193,35 +246,7 @@ export default function PitchAnalyzer() {
       setStatus("");
       return;
     }
-    setFileName(picked.fileName);
-    setIsVideo(
-      /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(picked.fileName) ||
-        !!picked.blob?.type.startsWith("video"),
-    );
-    setMediaUrl(picked.srcUrl);
-    setMarkers([]);
-    setRegionStart(null);
-    setRegionEnd(null);
-    setScroll(0);
-    setPlayhead(0);
-    setWaveform(null);
-    setStatus("波形抽出中...");
-    try {
-      const wf = await extractWaveform(picked, (stage) =>
-        setStatus(`波形抽出中: ${stage}`),
-      );
-      setWaveform(wf);
-      setStatus(
-        `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
-      );
-    } catch (e) {
-      console.error(e);
-      setWaveform(null);
-      setStatus(
-        "波形抽出失敗(動画は再生可)。" +
-          (e instanceof Error ? ` / ${e.message}` : ""),
-      );
-    }
+    await loadPickedMedia(picked);
   };
 
   const autoDetect = () => {
