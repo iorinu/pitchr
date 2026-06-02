@@ -16,6 +16,7 @@ import {
 import { pickMediaFile, type PickedMedia } from "./lib/openMediaFile";
 import { extractWaveform, type Waveform } from "./lib/extractWaveform";
 import { isTauri } from "./lib/platform";
+import { useT, useLocale } from "./lib/i18n";
 
 // Web 版で正式サポートする拡張子。
 // それ以外（mov, mkv, webm など）は WebCodecs/decodeAudioData では音声抽出が
@@ -179,6 +180,9 @@ export default function PitchAnalyzer() {
   const [isDragOver, setIsDragOver] = useState(false);
   // ヘッダのタブ切替え（解析画面 / 使い方）。URL は変えず useState のみで管理。
   const [tab, setTab] = useState<"analyze" | "help">("analyze");
+  // i18n. t() は翻訳関数、locale/setLocale は言語切替用。
+  const t = useT();
+  const [locale, setLocale] = useLocale();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -211,39 +215,37 @@ export default function PitchAnalyzer() {
     setWaveform(null);
 
     if (isUnsupportedOnWeb) {
-      setStatus(
-        "この形式は波形抽出に対応していません (Web 版が対応するのは mp4 / wav / mp3 / m4a)。動画再生のみ可能です。",
-      );
+      setStatus(t("status.unsupportedFormat"));
       return;
     }
 
-    setStatus("波形抽出中...");
+    setStatus(t("status.extracting"));
     try {
       const wf = await extractWaveform(picked, (stage) =>
-        setStatus(`波形抽出中: ${stage}`),
+        setStatus(t("status.extractingStage", { stage })),
       );
       setWaveform(wf);
       setStatus(
-        `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
+        t("status.loaded", {
+          duration: wf.duration.toFixed(1),
+          sampleRate: wf.sampleRate,
+        }),
       );
     } catch (e) {
       console.error(e);
       setWaveform(null);
       const detail = e instanceof Error ? e.message : String(e);
-      setStatus(
-        `波形抽出失敗(動画は再生可): ${detail}\n` +
-          "別の形式 (mp4/wav/mp3) を試してください。",
-      );
+      setStatus(t("status.extractFailed", { detail }));
     }
   };
 
   const openFile = async () => {
-    setStatus("ファイル選択中...");
+    setStatus(t("status.picking"));
     let picked;
     try {
       picked = await pickMediaFile();
     } catch (e) {
-      setStatus("ファイル選択キャンセル / エラー");
+      setStatus(t("status.pickCanceled"));
       return;
     }
     if (!picked) {
@@ -294,7 +296,7 @@ export default function PitchAnalyzer() {
       regionEnd,
     );
     setMarkers(found);
-    setStatus(`自動検出: ${found.length} 個`);
+    setStatus(t("status.autoDetected", { count: found.length }));
   };
 
   const draw = useCallback(() => {
@@ -378,7 +380,7 @@ export default function PitchAnalyzer() {
     } else {
       g.fillStyle = "#4a4d57";
       g.font = "12px ui-monospace";
-      g.fillText("波形なし(動画は再生できます)", 12, mid);
+      g.fillText(t("canvas.noWaveform"), 12, mid);
     }
 
     // 区間ハンドル
@@ -457,7 +459,7 @@ export default function PitchAnalyzer() {
       g.fillStyle = "#fff";
       g.fillText(label, lx, ly);
     }
-  }, [waveform, markers, pxPerSec, scroll, playhead, viewW, regionStart, regionEnd]);
+  }, [waveform, markers, pxPerSec, scroll, playhead, viewW, regionStart, regionEnd, t]);
 
   useEffect(() => {
     draw();
@@ -666,7 +668,7 @@ export default function PitchAnalyzer() {
       }
     });
     if (bestIdx < 0 || bestD > tol) {
-      setStatus("再生位置の近く (±100ms) にマーカーがありません");
+      setStatus(t("status.noMarkerNear"));
       return;
     }
     setMarkers((m) => m.filter((_, i) => i !== bestIdx));
@@ -726,9 +728,7 @@ export default function PitchAnalyzer() {
       {isDragOver && (
         <div style={S.dropOverlay}>
           <Upload size={36} />
-          <div style={{ marginTop: 12 }}>
-            ここにドロップして読み込む
-          </div>
+          <div style={{ marginTop: 12 }}>{t("drop.overlay")}</div>
           <div style={S.dropHint}>mp4 / wav / mp3 / m4a</div>
         </div>
       )}
@@ -736,27 +736,44 @@ export default function PitchAnalyzer() {
         <div style={S.brand}>
           <Footprints size={22} color="#ff3b4e" />
           <span style={S.title}>PITCHR</span>
-          <span style={S.sub}>接地音ピッチ解析</span>
+          <span style={S.sub}>{t("app.subtitle")}</span>
         </div>
         <div style={S.headerRight}>
+          {/* 言語切替。ja/en の 2 ボタンのみ。アクセス頻度低いので簡素に。 */}
+          <div style={S.tabs} aria-label={t("lang.label")}>
+            <button
+              style={locale === "ja" ? S.tabBtnActive : S.tabBtn}
+              onClick={() => setLocale("ja")}
+              aria-pressed={locale === "ja"}
+            >
+              日本語
+            </button>
+            <button
+              style={locale === "en" ? S.tabBtnActive : S.tabBtn}
+              onClick={() => setLocale("en")}
+              aria-pressed={locale === "en"}
+            >
+              EN
+            </button>
+          </div>
           <div style={S.tabs}>
             <button
               style={tab === "analyze" ? S.tabBtnActive : S.tabBtn}
               onClick={() => setTab("analyze")}
             >
-              解析
+              {t("tab.analyze")}
             </button>
             <button
               style={tab === "help" ? S.tabBtnActive : S.tabBtn}
               onClick={() => setTab("help")}
             >
-              使い方
+              {t("tab.help")}
             </button>
           </div>
           {tab === "analyze" && (
             <button style={S.uploadBtn} onClick={openFile}>
               <Upload size={15} />
-              <span>動画 / 音声を読込</span>
+              <span>{t("btn.openFile")}</span>
             </button>
           )}
         </div>
@@ -769,28 +786,28 @@ export default function PitchAnalyzer() {
 
       <div style={S.cards}>
         <Stat
-          label="平均ピッチ"
+          label={t("stats.avgPitch")}
           value={pitch ? pitch.avg.toFixed(2) : "—"}
-          unit="歩/秒"
+          unit={t("unit.ips")}
           icon={<Gauge size={15} />}
           big
         />
         <Stat
-          label="中央値"
+          label={t("stats.median")}
           value={pitch ? pitch.median.toFixed(2) : "—"}
-          unit="歩/秒"
+          unit={t("unit.ips")}
           icon={<Activity size={15} />}
         />
         <Stat
-          label="接地数(区間内)"
+          label={t("stats.stepCount")}
           value={pitch ? String(pitch.steps) : "0"}
-          unit="歩"
+          unit={t("unit.step")}
           icon={<Crosshair size={15} />}
         />
         <Stat
-          label="区間長"
+          label={t("stats.regionLen")}
           value={pitch ? pitch.duration.toFixed(2) : "—"}
-          unit="秒"
+          unit={t("unit.sec")}
           icon={<Activity size={15} />}
         />
       </div>
@@ -828,7 +845,7 @@ export default function PitchAnalyzer() {
             onWheel={onWheel}
           />
           {!mediaUrl && (
-            <div style={S.empty}>動画 or 音声ファイルを読み込んでください</div>
+            <div style={S.empty}>{t("canvas.loadPrompt")}</div>
           )}
         </div>
       </div>
@@ -842,35 +859,35 @@ export default function PitchAnalyzer() {
           value={Math.min(playhead, dur)}
           onChange={(e) => seek(parseFloat(e.target.value))}
           style={S.scrollbar}
-          aria-label="再生位置"
+          aria-label={t("aria.seek")}
         />
       )}
 
       <div style={S.controls}>
         <button style={S.iconBtn} onClick={togglePlay} disabled={!mediaUrl}>
           {playing ? <Pause size={16} /> : <Play size={16} />}
-          {playing ? "停止" : "再生"}
+          {playing ? t("ctrl.pause") : t("ctrl.play")}
         </button>
         <button
           style={S.iconBtn}
           onClick={() => stepFrame(-1)}
           disabled={!mediaUrl}
-          title="1フレーム戻す (←) / Shift+← で5フレーム"
+          title={t("ctrl.back1fTitle")}
         >
           <StepBack size={16} />
-          −1f
+          {t("ctrl.back1f")}
         </button>
         <button
           style={S.iconBtn}
           onClick={() => stepFrame(1)}
           disabled={!mediaUrl}
-          title="1フレーム進める (→) / Shift+→ で5フレーム"
+          title={t("ctrl.fwd1fTitle")}
         >
           <StepForward size={16} />
-          +1f
+          {t("ctrl.fwd1f")}
         </button>
         <div style={S.sliderGroup}>
-          <span style={S.sliderLabel}>fps</span>
+          <span style={S.sliderLabel}>{t("ctrl.fps")}</span>
           <input
             type="number"
             min={1}
@@ -886,7 +903,7 @@ export default function PitchAnalyzer() {
         </div>
         <button style={S.iconBtn} onClick={() => zoom(1.5)} disabled={!mediaUrl}>
           <ZoomIn size={16} />
-          拡大
+          {t("ctrl.zoomIn")}
         </button>
         <button
           style={S.iconBtn}
@@ -894,7 +911,7 @@ export default function PitchAnalyzer() {
           disabled={!mediaUrl}
         >
           <ZoomOut size={16} />
-          縮小
+          {t("ctrl.zoomOut")}
         </button>
         <div style={S.divider} />
         {[0.1, 0.25, 0.5, 0.75, 1].map((r) => {
@@ -923,7 +940,7 @@ export default function PitchAnalyzer() {
           disabled={!mediaUrl}
         >
           <FlagTriangleRight size={16} />
-          開始を設定
+          {t("ctrl.setStart")}
         </button>
         <button
           style={{ ...S.iconBtn, borderColor: "#ff9d2e", color: "#ff9d2e" }}
@@ -931,7 +948,7 @@ export default function PitchAnalyzer() {
           disabled={!mediaUrl}
         >
           <FlagTriangleLeft size={16} />
-          終了を設定
+          {t("ctrl.setEnd")}
         </button>
         <button
           style={S.iconBtn}
@@ -942,7 +959,7 @@ export default function PitchAnalyzer() {
           disabled={regionStart == null && regionEnd == null}
         >
           <RotateCcw size={16} />
-          区間リセット
+          {t("ctrl.resetRegion")}
         </button>
       </div>
 
@@ -951,19 +968,19 @@ export default function PitchAnalyzer() {
           style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
           onClick={(e) => addMarkerAtPlayhead(e.shiftKey)}
           disabled={!mediaUrl}
-          title="現在の再生位置にマーカーを追加 (M) / Shift+クリックで波形ピークにスナップ"
+          title={t("ctrl.addTitle")}
         >
           <MapPin size={16} />
-          現在位置に追加
+          {t("ctrl.addAtPlayhead")}
         </button>
         <button
           style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
           onClick={removeMarkerAtPlayhead}
           disabled={!mediaUrl || markers.length === 0}
-          title="現在の再生位置の近く (±100ms) のマーカーを削除 (D)"
+          title={t("ctrl.removeTitle")}
         >
           <MapPinOff size={16} />
-          現在位置を削除
+          {t("ctrl.removeAtPlayhead")}
         </button>
         <button
           style={{ ...S.iconBtn, borderColor: "#ff3b4e", color: "#ff7480" }}
@@ -971,10 +988,10 @@ export default function PitchAnalyzer() {
           disabled={!waveform}
         >
           <Wand2 size={16} />
-          自動検出
+          {t("ctrl.autoDetect")}
         </button>
         <div style={S.sliderGroup}>
-          <span style={S.sliderLabel}>感度</span>
+          <span style={S.sliderLabel}>{t("ctrl.sensitivity")}</span>
           <input
             type="range"
             min={0}
@@ -991,13 +1008,13 @@ export default function PitchAnalyzer() {
           disabled={!markers.length}
         >
           <Trash2 size={16} />
-          マーカー全消去
+          {t("ctrl.clearMarkers")}
         </button>
       </div>
 
       {pitch && pitch.instant.length > 0 && (
         <div style={S.chartWrap}>
-          <div style={S.chartTitle}>瞬間ピッチの推移(区間内・歩/秒)</div>
+          <div style={S.chartTitle}>{t("chart.instantTitle")}</div>
           <InstantChart instant={pitch.instant} />
         </div>
       )}
@@ -1005,24 +1022,22 @@ export default function PitchAnalyzer() {
       {stepRows.length > 0 && (
         <div style={S.chartWrap}>
           <div style={S.chartTitle}>
-            接地ごとのタイム(
-            {regionStart != null ? "区間開始" : "1歩目"}からの累積 / 直前との差分)
-            ・ 行クリックでそのマーカーへジャンプ
+            {t("chart.stepsTitle", {
+              base:
+                regionStart != null
+                  ? t("chart.baseRegionStart")
+                  : t("chart.baseFirstStep"),
+            })}
           </div>
           <StepsTable rows={stepRows} onJump={seek} playhead={playhead} />
         </div>
       )}
 
       <div style={S.footer}>
-        <span style={S.hint}>
-          空きをクリック=シーク / ダブルクリック=接地マーカー追加 /
-          マーカーをドラッグ=移動 / マーカーをダブルクリック=削除 ・
-          緑=開始 橙=終了の線もドラッグ可 ・ 波形は横ホイール/Shift+ホイールでスクロール ・
-          Space=再生/停止 / ←→=コマ送り(Shiftで5f) / M=現在位置にマーカー(Shiftで波形ピークに吸着) / D=現在位置近くのマーカー削除
-        </span>
+        <span style={S.hint}>{t("footer.hint")}</span>
         <span style={S.status}>{status}</span>
       </div>
-      {fileName && <div style={S.fname}>file: {fileName}</div>}
+      {fileName && <div style={S.fname}>{t("file.label", { name: fileName })}</div>}
         </>
       )}
     </div>
@@ -1031,7 +1046,14 @@ export default function PitchAnalyzer() {
 
 // ---- 使い方ページ ----
 // 最低限の手順 + ショートカット表のみ。テキストベースで軽量に。
+// 文章量が多くインライン <b>/<br> も多用するので、辞書化せず言語別に
+// JSX をまるごと分岐する方が読みやすい。
 function HelpView() {
+  const [locale] = useLocale();
+  return locale === "en" ? <HelpEN /> : <HelpJA />;
+}
+
+function HelpJA() {
   return (
     <div style={S.helpRoot}>
       <h2 style={S.helpH}>使い方</h2>
@@ -1100,6 +1122,78 @@ function HelpView() {
   );
 }
 
+function HelpEN() {
+  return (
+    <div style={S.helpRoot}>
+      <h2 style={S.helpH}>How to use</h2>
+      <ol style={S.helpList}>
+        <li>
+          <b>Load a video / audio file</b>
+          <br />
+          Click "Open video / audio" in the top right, or drag-and-drop a file
+          onto the window. Supported formats: mp4 / wav / mp3 / m4a.
+        </li>
+        <li>
+          <b>Set the analysis region</b>
+          <br />
+          Move the playhead and click "Set start" / "Set end" to define the
+          region. Everything outside the region is excluded from auto-detect
+          and statistics. The green / orange vertical lines can also be dragged.
+        </li>
+        <li>
+          <b>Place foot-strike markers</b>
+          <br />
+          Auto: click "Auto detect" to add markers based on the sensitivity slider.<br />
+          Manual: double-click the waveform to add, drag to move, double-click
+          a marker to remove.<br />
+          You can also use the "Add at playhead" button or the M key
+          (hold Shift to snap to the nearest waveform peak).
+        </li>
+        <li>
+          <b>Read the pitch values</b>
+          <br />
+          The top cards show the average, median, step count, and region length.
+          The table below shows per-step instantaneous pitch.
+        </li>
+      </ol>
+
+      <h3 style={S.helpH3}>Keyboard</h3>
+      <table style={S.helpTable}>
+        <tbody>
+          <tr><td style={S.helpKey}>Space</td><td>Play / Pause</td></tr>
+          <tr><td style={S.helpKey}>← / →</td><td>Step back / forward 1 frame (Shift for 5f)</td></tr>
+          <tr><td style={S.helpKey}>M</td><td>Add a marker at the playhead (Shift to snap to peak)</td></tr>
+          <tr><td style={S.helpKey}>D</td><td>Remove the marker nearest to the playhead</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style={S.helpH3}>Waveform controls</h3>
+      <ul style={S.helpList}>
+        <li>Horizontal wheel / Shift + vertical wheel: scroll the waveform horizontally</li>
+        <li>Use the zoom-in / zoom-out buttons to change the time-axis zoom level</li>
+      </ul>
+
+      <h3 style={S.helpH3}>Data handling</h3>
+      <ul style={S.helpList}>
+        <li>
+          The video / audio file you load is <b>processed entirely inside your browser</b>;
+          nothing is uploaded to a server.
+        </li>
+        <li>
+          Markers, region settings, and other interaction data also live only in
+          your browser. They are never sent to a server and not persisted —
+          they disappear when you close the tab.
+        </li>
+        <li>
+          As a fallback when mp4 decoding fails, the ffmpeg decoder
+          (~25MB) is downloaded from a CDN (jsDelivr). No data is uploaded
+          during this step either.
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 function StepsTable({
   rows,
   onJump,
@@ -1109,16 +1203,17 @@ function StepsTable({
   onJump: (t: number) => void;
   playhead: number;
 }) {
+  const t = useT();
   return (
     <div style={S.tableScroll}>
       <table style={S.table}>
         <thead>
           <tr>
             <th style={{ ...S.th, textAlign: "left" }}>#</th>
-            <th style={S.th}>時刻 (s)</th>
-            <th style={S.th}>累積 (s)</th>
-            <th style={S.th}>Δt (s)</th>
-            <th style={S.th}>歩/秒</th>
+            <th style={S.th}>{t("table.time")}</th>
+            <th style={S.th}>{t("table.cum")}</th>
+            <th style={S.th}>{t("table.delta")}</th>
+            <th style={S.th}>{t("table.ips")}</th>
           </tr>
         </thead>
         <tbody>
