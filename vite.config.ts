@@ -28,5 +28,16 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // ffmpeg.wasm が SharedArrayBuffer を使うので
+    // cross-origin isolation を有効にするヘッダを返す。
+    // Web 版でしか効かないが、Tauri 開発時に付いていても害はない。
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  // mp4box などのプリバンドルが効きやすくする。
+  optimizeDeps: {
+    exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
   },
 }));

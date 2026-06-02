@@ -13,8 +13,14 @@ import {
   Footprints, Activity, Gauge, Crosshair, FlagTriangleRight,
   FlagTriangleLeft, RotateCcw, MapPin, MapPinOff, StepBack, StepForward,
 } from "lucide-react";
-import { pickMediaFile } from "./lib/openMediaFile";
+import { pickMediaFile, type PickedMedia } from "./lib/openMediaFile";
 import { extractWaveform, type Waveform } from "./lib/extractWaveform";
+import { isTauri } from "./lib/platform";
+
+// Web 版で正式サポートする拡張子。
+// それ以外（mov, mkv, webm など）は WebCodecs/decodeAudioData では音声抽出が
+// 安定しないので、選んだ時点で明確に警告を出して諦めてもらう。
+const WEB_SUPPORTED = /\.(mp4|wav|mp3|m4a)$/i;
 
 // ============================================================
 // PITCHR — 接地音ベース ピッチ解析
@@ -169,6 +175,8 @@ export default function PitchAnalyzer() {
   const [status, setStatus] = useState("");
   const [fileName, setFileName] = useState("");
   const [viewW, setViewW] = useState(900);
+  // D&D 中の視覚フィードバック用。Web 環境でのみ意味を持つ。
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +187,53 @@ export default function PitchAnalyzer() {
   const mediaDur = mediaRef.current?.duration;
   const dur =
     waveform?.duration ?? (mediaDur && isFinite(mediaDur) ? mediaDur : 0);
+
+  // pickMediaFile（ボタン）と D&D の両方から呼ぶ共通ロード処理。
+  const loadPickedMedia = async (picked: PickedMedia) => {
+    // Web で対応外フォーマットは早めに警告。
+    // 動画再生はできることが多いので、波形だけ諦める形で続行する。
+    const isUnsupportedOnWeb =
+      !isTauri && !WEB_SUPPORTED.test(picked.fileName);
+
+    setFileName(picked.fileName);
+    setIsVideo(
+      /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(picked.fileName) ||
+        !!picked.blob?.type.startsWith("video"),
+    );
+    setMediaUrl(picked.srcUrl);
+    setMarkers([]);
+    setRegionStart(null);
+    setRegionEnd(null);
+    setScroll(0);
+    setPlayhead(0);
+    setWaveform(null);
+
+    if (isUnsupportedOnWeb) {
+      setStatus(
+        "この形式は波形抽出に対応していません (Web 版が対応するのは mp4 / wav / mp3 / m4a)。動画再生のみ可能です。",
+      );
+      return;
+    }
+
+    setStatus("波形抽出中...");
+    try {
+      const wf = await extractWaveform(picked, (stage) =>
+        setStatus(`波形抽出中: ${stage}`),
+      );
+      setWaveform(wf);
+      setStatus(
+        `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
+      );
+    } catch (e) {
+      console.error(e);
+      setWaveform(null);
+      const detail = e instanceof Error ? e.message : String(e);
+      setStatus(
+        `波形抽出失敗(動画は再生可): ${detail}\n` +
+          "別の形式 (mp4/wav/mp3) を試してください。",
+      );
+    }
+  };
 
   const openFile = async () => {
     setStatus("ファイル選択中...");
@@ -193,33 +248,38 @@ export default function PitchAnalyzer() {
       setStatus("");
       return;
     }
-    setFileName(picked.fileName);
-    setIsVideo(
-      /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(picked.fileName) ||
-        !!picked.blob?.type.startsWith("video"),
-    );
-    setMediaUrl(picked.srcUrl);
-    setMarkers([]);
-    setRegionStart(null);
-    setRegionEnd(null);
-    setScroll(0);
-    setPlayhead(0);
-    setWaveform(null);
-    setStatus("波形抽出中...");
-    try {
-      const wf = await extractWaveform(picked);
-      setWaveform(wf);
-      setStatus(
-        `読込完了 (${wf.duration.toFixed(1)}s / ${wf.sampleRate}Hz)`,
-      );
-    } catch (e) {
-      console.error(e);
-      setWaveform(null);
-      setStatus(
-        "波形抽出失敗(動画は再生可)。" +
-          (e instanceof Error ? ` / ${e.message}` : ""),
-      );
+    await loadPickedMedia(picked);
+  };
+
+  // ---- D&D（Web 専用） ----
+  // Tauri は独自の file-drop イベントがあるのでブラウザ側 D&D は使わない。
+  const onDragOver = (e: React.DragEvent) => {
+    if (isTauri) return;
+    // dragover で preventDefault しないと drop イベントが発火しない。
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragOver(true);
+      e.dataTransfer.dropEffect = "copy";
     }
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (isTauri) return;
+    // 子要素間を移動するたびに leave が飛ぶので、relatedTarget が root の外に
+    // 抜けた時だけ false にする。
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragOver(false);
+  };
+  const onDrop = async (e: React.DragEvent) => {
+    if (isTauri) return;
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    await loadPickedMedia({
+      srcUrl: URL.createObjectURL(file),
+      fileName: file.name,
+      blob: file,
+    });
   };
 
   const autoDetect = () => {
@@ -654,7 +714,21 @@ export default function PitchAnalyzer() {
   const stepRows = computeStepRows(markers, regionStart, regionEnd);
 
   return (
-    <div style={S.root}>
+    <div
+      style={S.root}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {isDragOver && (
+        <div style={S.dropOverlay}>
+          <Upload size={36} />
+          <div style={{ marginTop: 12 }}>
+            ここにドロップして読み込む
+          </div>
+          <div style={S.dropHint}>mp4 / wav / mp3 / m4a</div>
+        </div>
+      )}
       <div style={S.header}>
         <div style={S.brand}>
           <Footprints size={22} color="#ff3b4e" />
@@ -1042,7 +1116,9 @@ const mono = "'JetBrains Mono', ui-monospace, monospace";
 const display = "'Oswald', sans-serif";
 
 const S: Record<string, CSSProperties> = {
-  root: { background: "#0c0d10", color: "#e8e8ea", fontFamily: mono, padding: 20, borderRadius: 14, minHeight: 600, border: "1px solid #1d1f25" },
+  root: { position: "relative", background: "#0c0d10", color: "#e8e8ea", fontFamily: mono, padding: 20, borderRadius: 14, minHeight: 600, border: "1px solid #1d1f25" },
+  dropOverlay: { position: "absolute", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "rgba(12, 13, 16, 0.85)", border: "2px dashed #ff3b4e", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, pointerEvents: "none" },
+  dropHint: { marginTop: 4, fontSize: 12, color: "#7e818c", letterSpacing: 1 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
   brand: { display: "flex", alignItems: "center", gap: 10 },
   title: { fontFamily: display, fontSize: 24, letterSpacing: 3, fontWeight: 700, color: "#fff" },
