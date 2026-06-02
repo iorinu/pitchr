@@ -46,7 +46,16 @@ async function getFFmpeg(onProgress?: (msg: string) => void) {
     ffmpegInstance = ff;
     return ff;
   })();
-  return await loading;
+
+  try {
+    return await loading;
+  } catch (e) {
+    // 失敗時は loading をクリアして次回呼び出しで再試行できるようにする。
+    // クリアしないと、ネットワーク瞬断や CDN の一時障害で 1 回失敗しただけで
+    // ページをリロードしないと永久に ffmpeg.wasm が使えなくなる。
+    loading = null;
+    throw e;
+  }
 }
 
 export async function extractWaveformFFmpeg(
