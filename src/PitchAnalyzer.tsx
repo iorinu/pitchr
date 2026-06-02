@@ -210,7 +210,7 @@ export default function PitchAnalyzer() {
 
     if (isUnsupportedOnWeb) {
       setStatus(
-        "このファイル形式は Web 版では波形抽出に対応していません(mp4/wav/mp3/m4a のみ)。動画再生は可能です。",
+        "この形式は波形抽出に対応していません (Web 版が対応するのは mp4 / wav / mp3 / m4a)。動画再生のみ可能です。",
       );
       return;
     }
